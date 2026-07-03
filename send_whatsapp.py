@@ -209,8 +209,17 @@ async def main():
             return
 
         # Parse: PHONE file1.ogg [file2.ogg ...]
-        phone = args[0]
-        ogg_files = [Path(a).resolve() for a in args[1:]]
+        # If the first argument is an OGG file or exists, default phone to '919895822141'
+        if args[0].endswith('.ogg') or Path(args[0]).exists():
+            phone = '919895822141'
+            ogg_files = [Path(a).resolve() for a in args]
+        else:
+            phone = args[0]
+            ogg_files = [Path(a).resolve() for a in args[1:]]
+
+        # Auto-prepend country code 91 for 10-digit numbers
+        if len(phone) == 10 and phone.isdigit():
+            phone = '91' + phone
 
         if not ogg_files:
             print('Error: no OGG files specified.', file=sys.stderr)
