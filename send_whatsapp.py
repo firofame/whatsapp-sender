@@ -4,9 +4,11 @@ Uses Playwright to drive WhatsApp Web and injects WPPConnect/wa-js
 to send audio as a real PTT (push-to-talk) voice note with waveform.
 
 Usage:
-    python send_whatsapp.py --login          # First-time QR code scan
-    python send_whatsapp.py PHONE file.ogg   # Send voice note
-    python send_whatsapp.py PHONE f1.ogg f2.ogg ...  # Send multiple
+    python send_whatsapp.py --login                        # First-time QR code scan
+    python send_whatsapp.py PHONE file.ogg                 # Send voice note
+    python send_whatsapp.py PHONE file.ogg --title "TITLE" # Send with custom title/card
+    python send_whatsapp.py file.ogg --title "TITLE"       # Send to default phone
+    python send_whatsapp.py PHONE f1.ogg f2.ogg ...        # Send multiple
 
 PHONE should include country code without '+' (e.g. 919876543210).
 """
@@ -102,7 +104,9 @@ async def send_voice_note(page, phone: str, ogg_path: Path, title: str = None) -
             sys.exit(1)
 
     # Send text label first
-    print(f'Sending label "📖 {label}" to {phone}...')
+    # If the label already has emoji/formatting or is a multi-line card, send directly; otherwise format nicely
+    display_label = label if (label.startswith(('📖', '🌸', '🌹', '✨', '⚡', '🕌', '🕋', '*')) or '\n' in label) else f'📖 {label}'
+    print(f'Sending label/card to {phone}:\n{display_label}')
     label_result = await page.evaluate(
         """async ([chatId, text]) => {
             try {
@@ -112,7 +116,7 @@ async def send_voice_note(page, phone: str, ogg_path: Path, title: str = None) -
                 return { ok: false, error: e.message || String(e) };
             }
         }""",
-        [chat_id, f'📖 {label}'],
+        [chat_id, display_label],
     )
     if not label_result.get('ok'):
         print(f'⚠️ Warning: Failed to send label: {label_result.get("error")}', file=sys.stderr)
@@ -208,14 +212,33 @@ async def main():
             print('✅ Session saved!')
             return
 
-        # Parse: PHONE file1.ogg [file2.ogg ...]
+        # Extract optional --title or -t argument
+        title = None
+        remaining_args = []
+        idx = 0
+        while idx < len(args):
+            if args[idx] in ('--title', '-t') and idx + 1 < len(args):
+                title = args[idx + 1]
+                idx += 2
+            elif args[idx].startswith('--title='):
+                title = args[idx].split('=', 1)[1]
+                idx += 1
+            else:
+                remaining_args.append(args[idx])
+                idx += 1
+
+        # Parse: [PHONE] file1.ogg [file2.ogg ...]
         # If the first argument is an OGG file or exists, default phone to '919895822141'
-        if args[0].endswith('.ogg') or Path(args[0]).exists():
+        if not remaining_args:
+            print('Error: no target phone or OGG files specified.', file=sys.stderr)
+            sys.exit(1)
+
+        if remaining_args[0].endswith('.ogg') or Path(remaining_args[0]).exists():
             phone = '919895822141'
-            ogg_files = [Path(a).resolve() for a in args]
+            ogg_files = [Path(a).resolve() for a in remaining_args]
         else:
-            phone = args[0]
-            ogg_files = [Path(a).resolve() for a in args[1:]]
+            phone = remaining_args[0]
+            ogg_files = [Path(a).resolve() for a in remaining_args[1:]]
 
         # Auto-prepend country code 91 for 10-digit numbers
         if len(phone) == 10 and phone.isdigit():
@@ -234,7 +257,7 @@ async def main():
         await inject_wpp(page)
 
         for ogg_file in ogg_files:
-            await send_voice_note(page, phone, ogg_file)
+            await send_voice_note(page, phone, ogg_file, title=title)
             # Small delay between messages to avoid rate limiting
             if len(ogg_files) > 1:
                 await asyncio.sleep(1)
